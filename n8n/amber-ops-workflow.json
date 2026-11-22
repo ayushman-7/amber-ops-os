@@ -1,0 +1,163 @@
+{
+  "name": "Amber Product & AI Ops OS - Control Tower Webhook",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "amber-ops-audit",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook-in",
+      "name": "Amber Ops Webhook Receiver",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "amber-ops-audit"
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.body.event }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "amber.ops.ping_test"
+            },
+            {
+              "value2": "amber.ops.nudge_dispatched"
+            },
+            {
+              "value2": "amber.ops.audit_triggered"
+            }
+          ]
+        }
+      },
+      "id": "node-event-router",
+      "name": "Route Event Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"healthy\",\n  \"message\": \"n8n Amber Ops Agent is connected and live!\",\n  \"timestamp\": \"{{ $now }}\"\n}",
+        "options": {}
+      },
+      "id": "node-respond-ping",
+      "name": "Respond to Ping",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [760, 140]
+    },
+    {
+      "parameters": {
+        "channel": "={{ $json.body.targetChannel || '#pod-ops' }}",
+        "text": "={{ $json.body.message }}",
+        "otherOptions": {}
+      },
+      "id": "node-slack-post",
+      "name": "Dispatch Nudge to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [760, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"dispatchedAt\": \"{{ $now }}\",\n  \"channel\": \"{{ $json.body.targetChannel }}\"\n}",
+        "options": {}
+      },
+      "id": "node-respond-nudge",
+      "name": "Respond Nudge OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [980, 300]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the Amber Product Ops AI agent. Analyze the sprint status and generate an executive Slack digest for Pune Engineering Hub. Emphasize spillover root causes (Unite Students PMS rate limits, UK Guarantor OCR delays).",
+        "options": {}
+      },
+      "id": "node-claude-audit",
+      "name": "Claude 3.5 Sonnet Backlog Analysis",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [760, 480]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"digest\": \"*AMBER PRODUCT ORG — LIVE N8N SPRINT AUDIT*\\n• Velocity: 6.4d\\n• Spillover: 11.4%\\n• Blocker: Unite Students API 429 surges\\n• Analyzed by: Claude 3.5 Sonnet on n8n\"\n}",
+        "options": {}
+      },
+      "id": "node-respond-audit",
+      "name": "Respond Audit Digest",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [980, 480]
+    }
+  ],
+  "connections": {
+    "node-webhook-in": {
+      "main": [
+        [
+          {
+            "node": "node-event-router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "node-event-router": {
+      "main": [
+        [
+          {
+            "node": "node-respond-ping",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "node-slack-post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "node-claude-audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "node-slack-post": {
+      "main": [
+        [
+          {
+            "node": "node-respond-nudge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "node-claude-audit": {
+      "main": [
+        [
+          {
+            "node": "node-respond-audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

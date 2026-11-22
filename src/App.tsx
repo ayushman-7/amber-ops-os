@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Header } from './components/Header';
 import { WebhookModal } from './components/WebhookModal';
 import { SprintHealthTab } from './components/SprintHealthTab';
@@ -6,6 +6,7 @@ import { PrdAuditorTab } from './components/PrdAuditorTab';
 import { SlackHitlTab } from './components/SlackHitlTab';
 import { ReleaseOnboardingTab } from './components/ReleaseOnboardingTab';
 import { SprintAuditModal } from './components/SprintAuditModal';
+import { SlackChannelDrawer } from './components/SlackChannelDrawer';
 
 import { SPRINT_TICKETS } from './data/sprintTickets';
 import { PRD_AUDITS } from './data/prdAudits';
@@ -19,12 +20,16 @@ import {
   AuditFeedItem,
   OnboardingTask,
   WebhookConfig,
+  DispatchedSlackMessage,
 } from './types';
 import {
   getWebhookConfig,
-  saveWebhookConfig,
   executeSprintAuditWebhook,
   dispatchNudgeWebhook,
+  getStoredSlackMessages,
+  storeSlackMessage,
+  clearStoredSlackMessages,
+  playSlackChime,
 } from './utils/webhookClient';
 
 const INITIAL_AUDIT_FEED: AuditFeedItem[] = [
@@ -60,11 +65,15 @@ const INITIAL_AUDIT_FEED: AuditFeedItem[] = [
 export function App() {
   const [activeTab, setActiveTab] = useState<string>('sprint');
   const [selectedPod, setSelectedPod] = useState<Pod>('All Pods');
-  const [tickets, setTickets] = useState<SprintTicket[]>(SPRINT_TICKETS);
+  const [tickets] = useState<SprintTicket[]>(SPRINT_TICKETS);
   const [prds, setPrds] = useState<PrdAudit[]>(PRD_AUDITS);
   const [nudges, setNudges] = useState<SlackNudge[]>(INITIAL_SLACK_NUDGES);
   const [auditFeed, setAuditFeed] = useState<AuditFeedItem[]>(INITIAL_AUDIT_FEED);
   const [onboardingTasks, setOnboardingTasks] = useState<OnboardingTask[]>(INITIAL_ONBOARDING_TASKS);
+
+  // Live Slack Workspace Terminal drawer state & stored messages
+  const [isSlackDrawerOpen, setIsSlackDrawerOpen] = useState(false);
+  const [slackMessages, setSlackMessages] = useState<DispatchedSlackMessage[]>(getStoredSlackMessages());
 
   // Webhook settings modal
   const [isWebhookModalOpen, setIsWebhookModalOpen] = useState(false);
@@ -94,17 +103,34 @@ export function App() {
     setIsAuditRunning(false);
     setAuditDigestOutput(result.digestText);
 
-    // Append to live audit feed
     const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // Deliver digest into the Live Slack Workspace!
+    const newSlackMsg: DispatchedSlackMessage = {
+      id: `slack-${Date.now()}`,
+      channel: '#product-leadership-digest',
+      sender: 'amber-ops-bot',
+      senderRole: 'Weekly Sprint Digest',
+      senderBadge: 'APP',
+      text: result.digestText,
+      timestamp: nowStr,
+      ticketId: 'ALL-PODS',
+      isRealWebhookSent: result.isRealWebhook,
+    };
+    storeSlackMessage(newSlackMsg);
+    setSlackMessages((prev) => [newSlackMsg, ...prev]);
+    playSlackChime();
+
+    // Append to live audit feed
     setAuditFeed((prev) => [
       {
         id: `feed-${Date.now()}`,
         timestamp: nowStr,
         actor: 'PM Ops Orchestrator',
         action: result.isRealWebhook
-          ? 'Weekly Audit Dispatched via Production n8n Webhook'
+          ? 'Weekly Audit Dispatched to Real Webhooks'
           : 'Weekly Sprint Audit Executed (n8n Claude Simulator)',
-        details: 'Evaluated 15 tickets, computed 11.4% spillover rate, compiled Executive Slack Digest.',
+        details: 'Evaluated 15 tickets, computed 11.4% spillover rate, posted Executive Digest to #product-leadership-digest.',
         targetId: 'ALL-PODS',
         type: 'audit_run',
       },
@@ -131,13 +157,28 @@ export function App() {
       )
     );
 
-    // Call webhook client
-    await dispatchNudgeWebhook(
+    // Call webhook client (and real Slack webhook if configured)
+    const result = await dispatchNudgeWebhook(
       targetNudge.id,
       targetNudge.ticketId,
       targetNudge.targetChannel,
       targetNudge.draftedMessage
     );
+
+    // Deliver message into the Live Slack Workspace drawer!
+    const newSlackMsg: DispatchedSlackMessage = {
+      id: `slack-${Date.now()}`,
+      channel: targetNudge.targetChannel,
+      sender: 'amber-ops-bot',
+      senderRole: 'n8n Automated Agent',
+      senderBadge: 'APP',
+      text: targetNudge.draftedMessage,
+      timestamp: nowStr,
+      ticketId: targetNudge.ticketId,
+      isRealWebhookSent: result.isRealWebhook,
+    };
+    storeSlackMessage(newSlackMsg);
+    setSlackMessages((prev) => [newSlackMsg, ...prev]);
 
     // Log to audit feed
     setAuditFeed((prev) => [
@@ -178,7 +219,22 @@ export function App() {
       )
     );
 
-    await dispatchNudgeWebhook(targetNudge.id, targetNudge.ticketId, targetChannel, updatedMessage);
+    const result = await dispatchNudgeWebhook(targetNudge.id, targetNudge.ticketId, targetChannel, updatedMessage);
+
+    // Deliver message into the Live Slack Workspace drawer!
+    const newSlackMsg: DispatchedSlackMessage = {
+      id: `slack-${Date.now()}`,
+      channel: targetChannel,
+      sender: 'amber-ops-bot',
+      senderRole: 'Product Manager (HITL)',
+      senderBadge: 'APP',
+      text: updatedMessage,
+      timestamp: nowStr,
+      ticketId: targetNudge.ticketId,
+      isRealWebhookSent: result.isRealWebhook,
+    };
+    storeSlackMessage(newSlackMsg);
+    setSlackMessages((prev) => [newSlackMsg, ...prev]);
 
     setAuditFeed((prev) => [
       {
@@ -262,6 +318,30 @@ export function App() {
     );
   };
 
+  const handleSendCustomSlackMessage = (channel: string, text: string) => {
+    const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const newMsg: DispatchedSlackMessage = {
+      id: `slack-${Date.now()}`,
+      channel,
+      sender: 'ayushman (PM)',
+      senderRole: 'Lead Product Manager',
+      text,
+      timestamp: nowStr,
+    };
+    storeSlackMessage(newMsg);
+    setSlackMessages((prev) => [newMsg, ...prev]);
+
+    // Also forward to real Slack webhook if user has one configured
+    if (webhookConfig.slackWebhookUrl) {
+      dispatchNudgeWebhook('custom', 'MANUAL', channel, text);
+    }
+  };
+
+  const handleClearSlackMessages = () => {
+    clearStoredSlackMessages();
+    setSlackMessages([]);
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-[#F8FAFC]">
       {/* Executive Linear/Stripe Header */}
@@ -269,8 +349,10 @@ export function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         pendingNudgesCount={pendingNudgesCount}
+        slackMessageCount={slackMessages.length}
         webhookConfig={webhookConfig}
         onOpenWebhookModal={() => setIsWebhookModalOpen(true)}
+        onOpenSlackDrawer={() => setIsSlackDrawerOpen(true)}
       />
 
       {/* Main Tab Content */}
@@ -282,7 +364,7 @@ export function App() {
             setSelectedPod={setSelectedPod}
             onRunAudit={handleRunAudit}
             isAuditRunning={isAuditRunning}
-            onInspectPrd={(prdCode) => {
+            onInspectPrd={() => {
               setActiveTab('prd-auditor');
             }}
           />
@@ -311,7 +393,7 @@ export function App() {
           <ReleaseOnboardingTab
             onboardingTasks={onboardingTasks}
             onToggleTask={handleToggleOnboardingTask}
-            onInspectPrd={(prdCode) => {
+            onInspectPrd={() => {
               setActiveTab('prd-auditor');
             }}
           />
@@ -334,6 +416,16 @@ export function App() {
         currentStepIndex={auditStepIndex}
         digestOutput={auditDigestOutput}
         onGoToHitlTab={() => setActiveTab('slack-hitl')}
+      />
+
+      {/* Live Slack Workspace Terminal Drawer */}
+      <SlackChannelDrawer
+        isOpen={isSlackDrawerOpen}
+        onClose={() => setIsSlackDrawerOpen(false)}
+        messages={slackMessages}
+        onSendMessage={handleSendCustomSlackMessage}
+        onClearMessages={handleClearSlackMessages}
+        webhookConfig={webhookConfig}
       />
 
       {/* Executive Footer */}

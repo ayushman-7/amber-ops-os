@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, CheckCircle2, AlertCircle, Radio, Sparkles, RefreshCw, ExternalLink } from 'lucide-react';
+import { X, CheckCircle2, AlertCircle, Radio, Sparkles, RefreshCw, MessageSquare } from 'lucide-react';
 import { WebhookConfig } from '../types';
 import { saveWebhookConfig } from '../utils/webhookClient';
 
@@ -17,6 +17,7 @@ export const WebhookModal: React.FC<WebhookModalProps> = ({
   onSave,
 }) => {
   const [url, setUrl] = useState(config.url || '');
+  const [slackWebhookUrl, setSlackWebhookUrl] = useState(config.slackWebhookUrl || '');
   const [secretKey, setSecretKey] = useState(config.secretKey || '');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{
@@ -31,13 +32,36 @@ export const WebhookModal: React.FC<WebhookModalProps> = ({
     setTesting(true);
     setTestResult(null);
 
+    // Test Slack Webhook if entered
+    if (slackWebhookUrl.trim()) {
+      try {
+        await fetch(slackWebhookUrl.trim(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          mode: 'no-cors',
+          body: JSON.stringify({
+            text: '🚀 *Amber Ops OS Test Ping:* Slack webhook is connected and functional!'
+          })
+        });
+        setTestResult({
+          success: true,
+          message: 'Slack Webhook ping dispatched! Check your Slack channel for the test message.',
+          latencyMs: 120
+        });
+        setTesting(false);
+        return;
+      } catch (e: any) {
+        console.warn('Slack ping error:', e);
+      }
+    }
+
     if (!url.trim()) {
       // Test simulator
-      await new Promise((r) => setTimeout(r, 600));
+      await new Promise((r) => setTimeout(r, 500));
       setTesting(false);
       setTestResult({
         success: true,
-        message: 'Built-in n8n Claude Simulator is active & responsive! (Mock agent ready)',
+        message: 'Built-in n8n Claude Simulator & Live Slack Drawer are active! Ready for 1-click live testing.',
         latencyMs: 14,
       });
       return;
@@ -62,20 +86,20 @@ export const WebhookModal: React.FC<WebhookModalProps> = ({
       if (res.ok) {
         setTestResult({
           success: true,
-          message: `Webhook responded with HTTP ${res.status} OK!`,
+          message: `n8n Webhook responded with HTTP ${res.status} OK!`,
           latencyMs: latency,
         });
       } else {
         setTestResult({
           success: false,
-          message: `Webhook responded with HTTP ${res.status}. Falling back to simulator.`,
+          message: `n8n Webhook responded with HTTP ${res.status}. Falling back to simulator.`,
           latencyMs: latency,
         });
       }
     } catch (err: any) {
       setTestResult({
         success: false,
-        message: `Network error reaching URL: ${err.message || 'CORS / unreachable'}. The simulator will handle requests gracefully.`,
+        message: `Network error reaching URL: ${err.message || 'CORS / unreachable'}. The simulator and in-app Slack drawer will handle requests cleanly.`,
       });
     } finally {
       setTesting(false);
@@ -83,9 +107,10 @@ export const WebhookModal: React.FC<WebhookModalProps> = ({
   };
 
   const handleSave = () => {
-    const isCustom = Boolean(url.trim());
+    const isCustom = Boolean(url.trim() || slackWebhookUrl.trim());
     const updated: WebhookConfig = {
       url: url.trim(),
+      slackWebhookUrl: slackWebhookUrl.trim(),
       secretKey: secretKey.trim(),
       environment: isCustom ? 'production' : 'simulator',
       lastTriggered: new Date().toISOString(),
@@ -98,9 +123,11 @@ export const WebhookModal: React.FC<WebhookModalProps> = ({
 
   const handleUseSimulator = () => {
     setUrl('');
+    setSlackWebhookUrl('');
     setSecretKey('');
     const updated: WebhookConfig = {
       url: '',
+      slackWebhookUrl: '',
       environment: 'simulator',
       lastStatus: 'idle',
     };
@@ -108,7 +135,7 @@ export const WebhookModal: React.FC<WebhookModalProps> = ({
     onSave(updated);
     setTestResult({
       success: true,
-      message: 'Reset to Built-in n8n Simulator. Ready for 1-click live testing!',
+      message: 'Reset to Built-in Simulator. Real-time messages will route to the in-app Slack Feed!',
     });
   };
 
@@ -122,8 +149,8 @@ export const WebhookModal: React.FC<WebhookModalProps> = ({
               <Radio className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900">n8n Workflow Webhook Settings</h3>
-              <p className="text-xs text-slate-500">Connect your live n8n AI Agent or use the built-in simulator</p>
+              <h3 className="text-base font-bold text-slate-900">Automation &amp; Webhook Settings</h3>
+              <p className="text-xs text-slate-500">Route alerts to real Slack channels or your n8n workflows</p>
             </div>
           </div>
           <button
@@ -140,13 +167,32 @@ export const WebhookModal: React.FC<WebhookModalProps> = ({
             <Sparkles className="w-4 h-4 text-[#ED3A56] shrink-0 mt-0.5" />
             <div>
               <span className="font-semibold text-slate-900">Zero Setup Required: </span>
-              If left blank, Amber Product Ops OS defaults to an interactive built-in simulator with 1.5s animated step-by-step agent traces and authentic Slack digest responses so any visitor can test it live!
+              All approved nudges and digests automatically route into the <strong>Live Slack Feed</strong> in your top navigation bar. If you paste a real Slack or n8n webhook below, they will also ping your real Slack channels!
             </div>
           </div>
 
+          {/* Real Slack Incoming Webhook URL */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+              <span>Real Slack Incoming Webhook URL (Optional)</span>
+              <span className="text-[10px] text-emerald-600 font-normal">Pings Real Slack App</span>
+            </label>
+            <input
+              type="url"
+              placeholder="https://hooks.slack.com/services/T00/B00/XXXXX"
+              value={slackWebhookUrl}
+              onChange={(e) => setSlackWebhookUrl(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#ED3A56]/20 focus:border-[#ED3A56] transition-all font-mono text-xs"
+            />
+            <span className="text-[11px] text-slate-400 mt-1 block">
+              Created from your Slack App &rarr; Incoming Webhooks. Approved nudges will actually post to this channel.
+            </span>
+          </div>
+
+          {/* n8n Production Webhook URL */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-              Production n8n Webhook URL (POST)
+              n8n Workflow Webhook URL (Optional)
             </label>
             <input
               type="url"
@@ -204,7 +250,7 @@ export const WebhookModal: React.FC<WebhookModalProps> = ({
             onClick={handleUseSimulator}
             className="text-xs text-slate-500 hover:text-slate-800 underline underline-offset-2"
           >
-            Reset to Simulator
+            Reset to In-App Simulator
           </button>
 
           <div className="flex items-center space-x-2">

@@ -104,8 +104,22 @@ export interface ReleaseNoteTicket {
 
 export interface WebhookConfig {
   url: string;
+  slackWebhookUrl?: string;
   secretKey?: string;
   environment: 'production' | 'staging' | 'simulator';
   lastTriggered?: string;
   lastStatus?: 'success' | 'failed' | 'idle';
+}
+
+export interface DispatchedSlackMessage {
+  id: string;
+  channel: string;
+  sender: string;
+  senderRole?: string;
+  senderAvatar?: string;
+  senderBadge?: string;
+  text: string;
+  timestamp: string;
+  ticketId?: string;
+  isRealWebhookSent?: boolean;
 }

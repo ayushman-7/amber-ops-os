@@ -173,4 +173,4 @@ Serves the built bundle at `http://localhost:4173/amber-ops-os/`.
 
 ---
 
-*Engineered with ❤️ for Amber by Pune Product & AI Operations.*
+*Engineered with ❤️ for Amber by Ayushman*
